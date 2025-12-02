@@ -16,10 +16,10 @@ import {
   BackgroundVariant,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import MindMapNode from "../components/MindMapNode";
+import MindMapNode, { NodeData } from "../components/MindMapNode";
 
 // Initial nodes and edges
-const initialNodes: Node[] = [];
+const initialNodes: Node<NodeData>[] = [];
 
 const nodeTypes = { mindMapNode: MindMapNode };
 const initialEdges: Edge[] = [];
@@ -48,15 +48,13 @@ function Flow() {
         x: event.clientX,
         y: event.clientY,
       });
-      const newNode: Node = {
+      const newNode: Node<NodeData> = {
         id: getId(),
         type: "mindMapNode",
         position,
-        data: { label: "New Idea" },
+        data: { label: "", isGhost: false },
         style: {
-          backgroundColor: "#fff",
-          border: "1px solid #ccc",
-          padding: "10px",
+          backgroundColor: "transparent", // Remove extra white background
           width: "150px", // Fixed width for better layout
         },
       };
@@ -85,9 +83,9 @@ function Flow() {
     setIsGenerating(true);
     setContextMenu(null); // Close context menu
 
-    const parentNode = contextMenu.node;
+    const parentNode = contextMenu.node as Node<NodeData>; // Cast to Node<NodeData>
     const parentNodeId = parentNode.id;
-    const parentNodeText = parentNode.data?.label || "";
+    const parentNodeText = parentNode.data.label || "";
 
     try {
       const response = await fetch("/api/generate", {
@@ -107,26 +105,26 @@ function Flow() {
       const questions: string[] = data.questions || [];
 
       if (questions.length > 0) {
-        const newNodes: Node[] = [];
+        const newNodes: Node<NodeData>[] = [];
         const newEdges: Edge[] = [];
-        const offsetX = 250; // Horizontal spacing
-        const offsetY = 100; // Vertical spacing
+        const offsetX = 300; // Horizontal spacing
+        const baseY = parentNode.position.y - (questions.length - 1) * 50; // Start higher for spread
 
         questions.forEach((question, index) => {
           const newNodeId = getId();
-          const newNode: Node = {
+          const randomOffsetY = (Math.random() - 0.5) * 80; // +/- 40px random Y offset
+
+          const newNode: Node<NodeData> = {
             id: newNodeId,
             type: "mindMapNode",
             position: {
-              x: parentNode.position.x + offsetX,
-              y: parentNode.position.y + offsetY * index,
+              x: parentNode.position.x + offsetX + (index * 20), // Slight fanning
+              y: baseY + index * 100 + randomOffsetY,
             },
-            data: { label: question },
+            data: { label: "", isGhost: true, aiQuestion: question },
             style: {
-              backgroundColor: "#fff",
-              border: "1px solid #ccc",
-              padding: "10px",
-              width: "200px", // Adjusted width for questions
+              backgroundColor: "transparent", // Handled by MindMapNode component
+              width: "200px",
             },
           };
           newNodes.push(newNode);

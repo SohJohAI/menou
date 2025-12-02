@@ -6,7 +6,7 @@ import { Handle, Position, NodeProps, useReactFlow } from "@xyflow/react";
 export type NodeData = {
   label: string;
   isGhost?: boolean;
-  aiQuestion?: string;
+  question?: string; // Renamed from aiQuestion and kept for persistence
 };
 
 function MindMapNode({ id, data }: NodeProps) {
@@ -37,7 +37,7 @@ function MindMapNode({ id, data }: NodeProps) {
   );
 
   const isGhost = nodeData.isGhost;
-  const aiQuestion = nodeData.aiQuestion;
+  const question = nodeData.question; // Use 'question' now
 
   const containerClasses = `
     ${isGhost ? "bg-blue-50 border-dashed border-blue-400 rounded-2xl" : "bg-yellow-100 border-yellow-300 rounded-lg"}
@@ -50,16 +50,16 @@ function MindMapNode({ id, data }: NodeProps) {
       style={{ minWidth: "150px", minHeight: "50px" }}
     >
       <Handle type="target" position={Position.Top} />
-      {isGhost && aiQuestion && (
-        <p className="text-blue-700 text-sm mb-1">{aiQuestion}</p>
+      {question && ( // Always show question if it exists
+        <p className="font-bold text-sm mb-1 text-blue-700">{question}</p>
       )}
       <textarea
         id={`text-${id}`}
         name="text"
         onChange={onChange}
         className="nodrag w-full h-full resize-none bg-transparent focus:outline-none"
-        value={isGhost ? "" : nodeData.label} // ゴーストモードではテキストエリアを空にする
-        placeholder="アイデアを入力..."
+        value={nodeData.label} // Always show user's label
+        placeholder="回答を入力..."
         style={{ minWidth: "100px", minHeight: "30px" }}
       />
       <Handle type="source" position={Position.Bottom} />

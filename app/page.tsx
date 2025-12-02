@@ -14,6 +14,7 @@ import {
   Edge,
   Node,
   BackgroundVariant,
+  MarkerType, // Import MarkerType
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import MindMapNode, { NodeData } from "../components/MindMapNode";
@@ -52,7 +53,7 @@ function Flow() {
         id: getId(),
         type: "mindMapNode",
         position,
-        data: { label: "", isGhost: false },
+        data: { label: "", question: undefined, isGhost: false }, // Initialize question as undefined
         style: {
           backgroundColor: "transparent", // Remove extra white background
           width: "150px", // Fixed width for better layout
@@ -121,7 +122,7 @@ function Flow() {
               x: parentNode.position.x + offsetX + (index * 20), // Slight fanning
               y: baseY + index * 100 + randomOffsetY,
             },
-            data: { label: "", isGhost: true, aiQuestion: question },
+            data: { label: "", isGhost: true, question: question }, // Use 'question' now
             style: {
               backgroundColor: "transparent", // Handled by MindMapNode component
               width: "200px",
@@ -133,6 +134,9 @@ function Flow() {
             id: `e${parentNodeId}-${newNodeId}`,
             source: parentNodeId,
             target: newNodeId,
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+            },
           });
         });
 

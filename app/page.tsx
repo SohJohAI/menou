@@ -18,15 +18,9 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import MindMapNode, { NodeData } from "../components/MindMapNode";
-
-// ▼▼▼ 必要なコンポーネント ▼▼▼
 import AuthButton from "../components/AuthButton";
-
-// ▼▼▼ ここが抜けてた！ これがないと保存できない！ ▼▼▼
-// AuthButtonと同じクライアントを使うように修正
 import { supabase } from "../lib/supabaseClient"; 
 import { saveMindMap, fetchMindMap } from "../lib/supabaseFunctions";
-// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
 const initialNodes: Node<NodeData>[] = [];
 const nodeTypes = { mindMapNode: MindMapNode };
@@ -39,8 +33,6 @@ function Flow() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const { screenToFlowPosition } = useReactFlow();
-
-  // ユーザーID管理
   const [userId, setUserId] = useState<string | null>(null);
 
   const [contextMenu, setContextMenu] = useState<{
@@ -50,19 +42,14 @@ function Flow() {
   } | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // ▼▼▼ 1. 起動時 & ログイン変更時の処理 ▼▼▼
+  // ▼ 認証とデータ読み込み
   useEffect(() => {
     const init = async () => {
-      // 起動時に現在のユーザーをチェック
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
-        console.log("User found:", session.user.id);
         setUserId(session.user.id);
-        
-        // データ読み込み
         const data = await fetchMindMap(session.user.id);
         if (data && data.flow_data) {
-          console.log("Restoring data...");
           setNodes(data.flow_data.nodes || []);
           setEdges(data.flow_data.edges || []);
         }
@@ -70,21 +57,17 @@ function Flow() {
     };
     init();
 
-    // ログイン/ログアウトの監視
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (session?.user) {
-            console.log("Auth changed: Logged In");
             setUserId(session.user.id);
-            // ログインしたらデータを取りに行く
             const data = await fetchMindMap(session.user.id);
             if (data && data.flow_data) {
                 setNodes(data.flow_data.nodes || []);
                 setEdges(data.flow_data.edges || []);
             }
         } else {
-            console.log("Auth changed: Logged Out");
             setUserId(null);
-            setNodes([]); // ログアウトしたら画面クリア
+            setNodes([]);
             setEdges([]);
         }
     });
@@ -94,20 +77,16 @@ function Flow() {
     };
   }, [setNodes, setEdges]);
 
-  // ▼▼▼ 2. 自動保存ロジック (1秒デバウンス) ▼▼▼
+  // ▼ 自動保存
   useEffect(() => {
     if (!userId) return;
-
     const timer = setTimeout(() => {
-      console.log("Auto-saving...");
       saveMindMap(userId, nodes, edges);
     }, 1000);
-
     return () => clearTimeout(timer);
   }, [nodes, edges, userId]);
 
-
-  // --- 以下、右クリックメニューなどの処理 ---
+  // --- 操作系 ---
 
   const onPaneContextMenu = useCallback(
     (event: any) => {
@@ -149,7 +128,6 @@ function Flow() {
 
   const handleGenerateFromNode = useCallback(async () => {
     if (!contextMenu?.node) return;
-
     setIsGenerating(true);
     setContextMenu(null);
 
@@ -180,7 +158,6 @@ function Flow() {
         questions.forEach((question, index) => {
           const newNodeId = getId();
           const randomOffsetY = (Math.random() - 0.5) * 80;
-
           const newNode: Node<NodeData> = {
             id: newNodeId,
             type: "mindMapNode",
@@ -189,13 +166,9 @@ function Flow() {
               y: baseY + index * 100 + randomOffsetY,
             },
             data: { label: "", isGhost: true, question: question },
-            style: {
-              backgroundColor: "transparent",
-              width: "200px",
-            },
+            style: { backgroundColor: "transparent", width: "200px" },
           };
           newNodes.push(newNode);
-
           newEdges.push({
             id: `e${parentNode.id}-${newNodeId}`,
             source: parentNode.id,
@@ -203,17 +176,53 @@ function Flow() {
             markerEnd: { type: MarkerType.ArrowClosed },
           });
         });
-
         setNodes((nds) => nds.concat(newNodes));
         setEdges((eds) => addEdge(newEdges[0], eds).concat(newEdges.slice(1)));
       }
     } catch (err) {
-      console.error("AI generation error:", err);
-      alert(`AI生成エラー: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(err);
+      alert("AI生成エラー");
     } finally {
       setIsGenerating(false);
     }
   }, [contextMenu, setNodes, setEdges]);
+
+  // ▼ 単体削除ロジック
+  const handleDeleteNode = useCallback(() => {
+    if (!contextMenu?.node) return;
+    const deleteNodeId = contextMenu.node.id;
+    setNodes((nds) => nds.filter((n) => n.id !== deleteNodeId));
+    setEdges((eds) => eds.filter((e) => e.source !== deleteNodeId && e.target !== deleteNodeId));
+    setContextMenu(null);
+  }, [contextMenu, setNodes, setEdges]);
+
+  // ▼▼▼ 追加: 枝ごと（子孫も）削除するロジック ▼▼▼
+  const getDescendants = (nodeId: string, currentEdges: Edge[]): string[] => {
+    let descendants: string[] = [];
+    const children = currentEdges.filter(e => e.source === nodeId);
+    for (const child of children) {
+        descendants.push(child.target);
+        // 再帰的に孫、ひ孫も探す
+        descendants = [...descendants, ...getDescendants(child.target, currentEdges)];
+    }
+    return descendants;
+  };
+
+  const handleDeleteBranch = useCallback(() => {
+    if (!contextMenu?.node) return;
+    const rootId = contextMenu.node.id;
+    
+    // 自分自身 + 全ての子孫を探し出す
+    const descendants = getDescendants(rootId, edges);
+    const nodesToDelete = [rootId, ...descendants];
+
+    // まとめて削除
+    setNodes((nds) => nds.filter((n) => !nodesToDelete.includes(n.id)));
+    setEdges((eds) => eds.filter((e) => !nodesToDelete.includes(e.source) && !nodesToDelete.includes(e.target)));
+    
+    setContextMenu(null);
+  }, [contextMenu, edges, setNodes, setEdges]);
+  // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
   return (
     <>
@@ -225,14 +234,30 @@ function Flow() {
       {contextMenu && (
         <div
           style={{ top: contextMenu.y, left: contextMenu.x }}
-          className="absolute z-10 bg-white border border-gray-200 rounded shadow-lg p-1"
+          className="absolute z-10 bg-white border border-gray-200 rounded shadow-lg p-1 min-w-[180px]"
         >
           <button
             onClick={handleGenerateFromNode}
             disabled={isGenerating}
-            className="block w-full text-left px-3 py-1 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+            className="block w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 border-b border-gray-100"
           >
-            AIに展開する
+            ✨ AIに展開する
+          </button>
+          
+          {/* 単体削除 */}
+          <button
+            onClick={handleDeleteNode}
+            className="block w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
+          >
+            🗑️ ノード削除
+          </button>
+
+          {/* ▼ 追加: 枝ごと削除 */}
+          <button
+            onClick={handleDeleteBranch}
+            className="block w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 border-t border-gray-100 font-bold"
+          >
+            🌳 以降を全て削除
           </button>
         </div>
       )}

@@ -1,14 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { supabase } from "../lib/supabaseClient"; // ←ここパス合ってるか確認！
+import { supabase } from "../lib/supabaseClient"; // パスは環境に合わせて
 import { Session } from "@supabase/supabase-js";
 
 export default function AuthButton() {
   const [session, setSession] = useState<Session | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // ログイン状態の監視
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -27,11 +26,12 @@ export default function AuthButton() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    // ▼ 強制リロードで画面をリセット
+    window.location.reload();
   };
 
   return (
     <>
-      {/* 右上のボタン本体 */}
       {session ? (
         <div className="fixed top-4 right-4 z-50 flex items-center space-x-2 bg-white/80 backdrop-blur p-2 rounded-lg shadow-sm">
           <span className="text-gray-700 text-sm font-medium">
@@ -55,7 +55,6 @@ export default function AuthButton() {
         </div>
       )}
 
-      {/* 認証モーダル (isModalOpenの時だけ表示) */}
       {isModalOpen && (
         <AuthModal onClose={() => setIsModalOpen(false)} />
       )}
@@ -63,7 +62,6 @@ export default function AuthButton() {
   );
 }
 
-// ▼▼▼ サブコンポーネント: モーダル本体 ▼▼▼
 function AuthModal({ onClose }: { onClose: () => void }) {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
@@ -77,13 +75,10 @@ function AuthModal({ onClose }: { onClose: () => void }) {
     
     try {
       if (isLogin) {
-        // ログイン処理
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        // 成功したら閉じる
         onClose();
       } else {
-        // 新規登録処理
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
         setMessage("確認メールを送信しました！メール内のリンクを踏んでください。");

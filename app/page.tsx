@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   ReactFlow,
   Controls,
@@ -14,14 +14,21 @@ import {
   Edge,
   Node,
   BackgroundVariant,
-  MarkerType, // Import MarkerType
+  MarkerType,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import MindMapNode, { NodeData } from "../components/MindMapNode";
 
-// Initial nodes and edges
-const initialNodes: Node<NodeData>[] = [];
+// ▼▼▼ 必要なコンポーネント ▼▼▼
+import AuthButton from "../components/AuthButton";
 
+// ▼▼▼ ここが抜けてた！ これがないと保存できない！ ▼▼▼
+// AuthButtonと同じクライアントを使うように修正
+import { supabase } from "../lib/supabaseClient"; 
+import { saveMindMap, fetchMindMap } from "../lib/supabaseFunctions";
+// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
+const initialNodes: Node<NodeData>[] = [];
 const nodeTypes = { mindMapNode: MindMapNode };
 const initialEdges: Edge[] = [];
 
@@ -31,7 +38,10 @@ const getId = () => `dndnode_${id++}`;
 function Flow() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
-  const { screenToFlowPosition, getNodes } = useReactFlow();
+  const { screenToFlowPosition } = useReactFlow();
+
+  // ユーザーID管理
+  const [userId, setUserId] = useState<string | null>(null);
 
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -40,10 +50,69 @@ function Flow() {
   } | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
 
+  // ▼▼▼ 1. 起動時 & ログイン変更時の処理 ▼▼▼
+  useEffect(() => {
+    const init = async () => {
+      // 起動時に現在のユーザーをチェック
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        console.log("User found:", session.user.id);
+        setUserId(session.user.id);
+        
+        // データ読み込み
+        const data = await fetchMindMap(session.user.id);
+        if (data && data.flow_data) {
+          console.log("Restoring data...");
+          setNodes(data.flow_data.nodes || []);
+          setEdges(data.flow_data.edges || []);
+        }
+      }
+    };
+    init();
+
+    // ログイン/ログアウトの監視
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+        if (session?.user) {
+            console.log("Auth changed: Logged In");
+            setUserId(session.user.id);
+            // ログインしたらデータを取りに行く
+            const data = await fetchMindMap(session.user.id);
+            if (data && data.flow_data) {
+                setNodes(data.flow_data.nodes || []);
+                setEdges(data.flow_data.edges || []);
+            }
+        } else {
+            console.log("Auth changed: Logged Out");
+            setUserId(null);
+            setNodes([]); // ログアウトしたら画面クリア
+            setEdges([]);
+        }
+    });
+
+    return () => {
+        authListener.subscription.unsubscribe();
+    };
+  }, [setNodes, setEdges]);
+
+  // ▼▼▼ 2. 自動保存ロジック (1秒デバウンス) ▼▼▼
+  useEffect(() => {
+    if (!userId) return;
+
+    const timer = setTimeout(() => {
+      console.log("Auto-saving...");
+      saveMindMap(userId, nodes, edges);
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [nodes, edges, userId]);
+
+
+  // --- 以下、右クリックメニューなどの処理 ---
+
   const onPaneContextMenu = useCallback(
     (event: any) => {
       event.preventDefault();
-      setContextMenu(null); // Close any open node context menu
+      setContextMenu(null);
 
       const position = screenToFlowPosition({
         x: event.clientX,
@@ -53,10 +122,10 @@ function Flow() {
         id: getId(),
         type: "mindMapNode",
         position,
-        data: { label: "", question: undefined, isGhost: false }, // Initialize question as undefined
+        data: { label: "", question: undefined, isGhost: false },
         style: {
-          backgroundColor: "transparent", // Remove extra white background
-          width: "150px", // Fixed width for better layout
+          backgroundColor: "transparent",
+          width: "150px",
         },
       };
       setNodes((nds) => nds.concat(newNode));
@@ -82,18 +151,15 @@ function Flow() {
     if (!contextMenu?.node) return;
 
     setIsGenerating(true);
-    setContextMenu(null); // Close context menu
+    setContextMenu(null);
 
-    const parentNode = contextMenu.node as Node<NodeData>; // Cast to Node<NodeData>
-    const parentNodeId = parentNode.id;
+    const parentNode = contextMenu.node as Node<NodeData>;
     const parentNodeText = parentNode.data.label || "";
 
     try {
       const response = await fetch("/api/generate", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: parentNodeText }),
       });
 
@@ -108,49 +174,46 @@ function Flow() {
       if (questions.length > 0) {
         const newNodes: Node<NodeData>[] = [];
         const newEdges: Edge[] = [];
-        const offsetX = 300; // Horizontal spacing
-        const baseY = parentNode.position.y - (questions.length - 1) * 50; // Start higher for spread
+        const offsetX = 300;
+        const baseY = parentNode.position.y - (questions.length - 1) * 50;
 
         questions.forEach((question, index) => {
           const newNodeId = getId();
-          const randomOffsetY = (Math.random() - 0.5) * 80; // +/- 40px random Y offset
+          const randomOffsetY = (Math.random() - 0.5) * 80;
 
           const newNode: Node<NodeData> = {
             id: newNodeId,
             type: "mindMapNode",
             position: {
-              x: parentNode.position.x + offsetX + (index * 20), // Slight fanning
+              x: parentNode.position.x + offsetX + (index * 20),
               y: baseY + index * 100 + randomOffsetY,
             },
-            data: { label: "", isGhost: true, question: question }, // Use 'question' now
+            data: { label: "", isGhost: true, question: question },
             style: {
-              backgroundColor: "transparent", // Handled by MindMapNode component
+              backgroundColor: "transparent",
               width: "200px",
             },
           };
           newNodes.push(newNode);
 
           newEdges.push({
-            id: `e${parentNodeId}-${newNodeId}`,
-            source: parentNodeId,
+            id: `e${parentNode.id}-${newNodeId}`,
+            source: parentNode.id,
             target: newNodeId,
-            markerEnd: {
-              type: MarkerType.ArrowClosed,
-            },
+            markerEnd: { type: MarkerType.ArrowClosed },
           });
         });
 
         setNodes((nds) => nds.concat(newNodes));
-        setEdges((eds) => addEdge(newEdges[0], eds).concat(newEdges.slice(1))); // Add all new edges
+        setEdges((eds) => addEdge(newEdges[0], eds).concat(newEdges.slice(1)));
       }
     } catch (err) {
       console.error("AI generation error:", err);
-      // Implement toast notification here if desired
-      alert(`AI生成中にエラーが発生しました: ${err instanceof Error ? err.message : String(err)}`);
+      alert(`AI生成エラー: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsGenerating(false);
     }
-  }, [contextMenu, setNodes, setEdges, addEdge]);
+  }, [contextMenu, setNodes, setEdges]);
 
   return (
     <>
@@ -193,7 +256,8 @@ function Flow() {
 
 export default function Home() {
   return (
-    <div style={{ width: "100vw", height: "100vh" }}>
+    <div style={{ width: "100vw", height: "100vh", position: "relative" }}>
+      <AuthButton />
       <ReactFlowProvider>
         <Flow />
       </ReactFlowProvider>

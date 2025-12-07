@@ -3,18 +3,23 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export async function POST(req: NextRequest) {
     try {
-        const { sourceA, sourceB } = await req.json();
+        const body = await req.json();
+        const { sourceA, sourceB } = body;
 
         if (!sourceA || !sourceB) {
+            console.error("Missing sourceA or sourceB:", body);
             return NextResponse.json({ error: "Source A and B are required" }, { status: 400 });
         }
 
         const apiKey = process.env.GEMINI_API_KEY;
         if (!apiKey) {
+            console.error("GEMINI_API_KEY is not set");
             return NextResponse.json({ error: "GEMINI_API_KEY is not set" }, { status: 500 });
         }
 
         const genAI = new GoogleGenerativeAI(apiKey);
+        // Use gemini-2.5-flash as requested. If fails, try gemini-1.5-flash manually if needed, 
+        // but for now strict to 2.5-flash.
         const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
         const prompt = `
@@ -31,20 +36,28 @@ AとBを単に並べるのではなく、矛盾を解決したり、化学反応
 - 説明不要。
 `;
 
-        const result = await model.generateContent({
-            contents: [{ role: "user", parts: [{ text: prompt }] }],
-            generationConfig: {
-                responseMimeType: "application/json",
-            },
-        });
+        try {
+            const result = await model.generateContent({
+                contents: [{ role: "user", parts: [{ text: prompt }] }],
+                generationConfig: {
+                    responseMimeType: "application/json",
+                },
+            });
 
-        const responseText = result.response.text();
-        const parsed = JSON.parse(responseText);
+            const responseText = result.response.text();
 
-        return NextResponse.json(parsed);
+            // Try parse using normal JSON.parse
+            const parsed = JSON.parse(responseText);
+            return NextResponse.json(parsed);
 
-    } catch (error) {
-        console.error("Synthesis error:", error);
-        return NextResponse.json({ error: "Failed to synthesize" }, { status: 500 });
+        } catch (genError: any) {
+            console.error("Gemini Generation/Parsing Error:", genError);
+            console.error("Raw Response Text (if available):", genError.response?.text?.());
+            return NextResponse.json({ error: "Failed to generate content from AI.", details: genError.message }, { status: 500 });
+        }
+
+    } catch (error: any) {
+        console.error("Synthesis API Logic Error:", error);
+        return NextResponse.json({ error: "Internal Server Error in Synthesis API", details: error.message }, { status: 500 });
     }
 }

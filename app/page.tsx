@@ -36,11 +36,8 @@ function Flow() {
   const { screenToFlowPosition } = useReactFlow();
   const [userId, setUserId] = useState<string | null>(null);
 
-  const [contextMenu, setContextMenu] = useState<{
-    x: number;
-    y: number;
-    node: Node;
-  } | null>(null);
+  // ▼ Selection State (instead of Context Menu)
+  const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
 
   // ▼ 認証とデータ読み込み
@@ -89,10 +86,23 @@ function Flow() {
 
   // --- 操作系 ---
 
+  const onPaneClick = useCallback(() => {
+    setSelectedNode(null);
+  }, []);
+
+  const onNodeClick = useCallback(
+    (event: React.MouseEvent, node: Node) => {
+      // Prevent event bubbling if needed, but ReactFlow usually handles basic selection
+      // However, we need to track our own state for the Action Bar
+      setSelectedNode(node);
+    },
+    []
+  );
+
   const onPaneContextMenu = useCallback(
     (event: any) => {
       event.preventDefault();
-      setContextMenu(null);
+      setSelectedNode(null);
 
       const position = screenToFlowPosition({
         x: event.clientX,
@@ -113,32 +123,27 @@ function Flow() {
     [screenToFlowPosition, setNodes]
   );
 
+  // Disable default context menu or make it just select the node?
+  // User requested to disable/change logic. We'll map it to selection for consistency.
   const onNodeContextMenu = useCallback(
     (event: React.MouseEvent, node: Node) => {
       event.preventDefault();
-      setContextMenu({
-        x: event.clientX,
-        y: event.clientY,
-        node,
-      });
+      setSelectedNode(node);
     },
-    [setContextMenu]
+    []
   );
 
-  const onPaneClick = useCallback(() => setContextMenu(null), []);
-
   const handleGenerateFromNode = useCallback(async () => {
-    if (!contextMenu?.node) return;
+    if (!selectedNode) return;
     setIsGenerating(true);
-    setContextMenu(null);
+    // Don't clear selection immediately so user can see what they are acting on,
+    // or clear it if preferred. Let's keep it for now.
 
-    const parentNode = contextMenu.node as Node<NodeData>;
-    // const parentNodeText = parentNode.data.label || "";
+    const parentNode = selectedNode as Node<NodeData>;
 
     try {
-      // 改修: ルートまで遡って履歴を取得する
       const contextHistory = getContextHistory(parentNode, nodes as Node<NodeData>[], edges);
-      setDebugContext(contextHistory); // Debug Update
+      setDebugContext(contextHistory);
 
       const response = await fetch("/api/generate", {
         method: "POST",
@@ -152,7 +157,7 @@ function Flow() {
       }
 
       const data = await response.json();
-      setDebugResponse(data); // Debug Update
+      setDebugResponse(data);
       const questions: string[] = data.questions || [];
 
       if (questions.length > 0) {
@@ -185,22 +190,23 @@ function Flow() {
         setNodes((nds) => nds.concat(newNodes));
         setEdges((eds) => addEdge(newEdges[0], eds).concat(newEdges.slice(1)));
       }
+      setSelectedNode(null); // Clear selection after action
     } catch (err) {
       console.error(err);
       alert("AI生成エラー");
     } finally {
       setIsGenerating(false);
     }
-  }, [contextMenu, setNodes, setEdges]);
+  }, [selectedNode, nodes, edges, setNodes, setEdges]); // Added dependencies
 
   // ▼ 単体削除ロジック
   const handleDeleteNode = useCallback(() => {
-    if (!contextMenu?.node) return;
-    const deleteNodeId = contextMenu.node.id;
+    if (!selectedNode) return;
+    const deleteNodeId = selectedNode.id;
     setNodes((nds) => nds.filter((n) => n.id !== deleteNodeId));
     setEdges((eds) => eds.filter((e) => e.source !== deleteNodeId && e.target !== deleteNodeId));
-    setContextMenu(null);
-  }, [contextMenu, setNodes, setEdges]);
+    setSelectedNode(null);
+  }, [selectedNode, setNodes, setEdges]);
 
   // ▼▼▼ 追加: 枝ごと（子孫も）削除するロジック ▼▼▼
   const getDescendants = (nodeId: string, currentEdges: Edge[]): string[] => {
@@ -208,26 +214,23 @@ function Flow() {
     const children = currentEdges.filter(e => e.source === nodeId);
     for (const child of children) {
       descendants.push(child.target);
-      // 再帰的に孫、ひ孫も探す
       descendants = [...descendants, ...getDescendants(child.target, currentEdges)];
     }
     return descendants;
   };
 
   const handleDeleteBranch = useCallback(() => {
-    if (!contextMenu?.node) return;
-    const rootId = contextMenu.node.id;
+    if (!selectedNode) return;
+    const rootId = selectedNode.id;
 
-    // 自分自身 + 全ての子孫を探し出す
     const descendants = getDescendants(rootId, edges);
     const nodesToDelete = [rootId, ...descendants];
 
-    // まとめて削除
     setNodes((nds) => nds.filter((n) => !nodesToDelete.includes(n.id)));
     setEdges((eds) => eds.filter((e) => !nodesToDelete.includes(e.source) && !nodesToDelete.includes(e.target)));
 
-    setContextMenu(null);
-  }, [contextMenu, edges, setNodes, setEdges]);
+    setSelectedNode(null);
+  }, [selectedNode, edges, setNodes, setEdges]);
   // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
   // ▼ Debug Panel Logic
@@ -271,8 +274,8 @@ function Flow() {
         </div>
       )}
 
-      {/* Create Proposal Button */}
-      <div className="fixed top-4 right-32 z-50 pointer-events-auto">
+      {/* Create Proposal Button - Bottom Right */}
+      <div className="fixed bottom-4 right-4 z-50 pointer-events-auto">
         <button
           onClick={handleCreateProposal}
           disabled={isDrafting}
@@ -281,6 +284,36 @@ function Flow() {
           {isDrafting ? "生成中..." : "📝 企画書を作成"}
         </button>
       </div>
+
+      {/* Action Bar (Replaces Context Menu) */}
+      {selectedNode && (
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 pointer-events-auto flex items-center space-x-2 bg-white rounded-full shadow-xl px-4 py-2 border border-gray-100">
+          <button
+            onClick={handleGenerateFromNode}
+            disabled={isGenerating}
+            className="flex flex-col items-center justify-center px-3 py-1 text-xs text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-50 transition"
+          >
+            <span className="text-xl mb-1">✨</span>
+            <span>広げる</span>
+          </button>
+          <div className="w-px h-8 bg-gray-200 mx-1"></div>
+          <button
+            onClick={handleDeleteNode}
+            className="flex flex-col items-center justify-center px-3 py-1 text-xs text-gray-700 hover:bg-gray-100 rounded-lg transition"
+          >
+            <span className="text-xl mb-1">🗑️</span>
+            <span>削除</span>
+          </button>
+          <div className="w-px h-8 bg-gray-200 mx-1"></div>
+          <button
+            onClick={handleDeleteBranch}
+            className="flex flex-col items-center justify-center px-3 py-1 text-xs text-red-600 hover:bg-red-50 rounded-lg transition font-medium"
+          >
+            <span className="text-xl mb-1">🌳</span>
+            <span>枝ごと削除</span>
+          </button>
+        </div>
+      )}
 
       {/* Proposal Result Modal */}
       {draftResult && (
@@ -311,8 +344,8 @@ function Flow() {
         </div>
       )}
 
-      {/* Debug Panel Toggle */}
-      <div className="fixed bottom-4 left-4 z-50 pointer-events-auto">
+      {/* Debug Panel Toggle (Hidden) */}
+      <div className="hidden fixed bottom-4 left-4 z-50 pointer-events-auto">
         <button
           onClick={() => setShowDebug(!showDebug)}
           className="bg-gray-800 text-white px-3 py-1 rounded-full text-xs font-mono hover:bg-gray-700 shadow-lg"
@@ -335,36 +368,6 @@ function Flow() {
         </div>
       )}
 
-      {contextMenu && (
-        <div
-          style={{ top: contextMenu.y, left: contextMenu.x }}
-          className="absolute z-10 bg-white border border-gray-200 rounded shadow-lg p-1 min-w-[180px]"
-        >
-          <button
-            onClick={handleGenerateFromNode}
-            disabled={isGenerating}
-            className="block w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 border-b border-gray-100"
-          >
-            ✨ AIに展開する
-          </button>
-
-          {/* 単体削除 */}
-          <button
-            onClick={handleDeleteNode}
-            className="block w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
-          >
-            🗑️ ノード削除
-          </button>
-
-          {/* ▼ 追加: 枝ごと削除 */}
-          <button
-            onClick={handleDeleteBranch}
-            className="block w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 border-t border-gray-100 font-bold"
-          >
-            🌳 以降を全て削除
-          </button>
-        </div>
-      )}
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -372,6 +375,7 @@ function Flow() {
         onEdgesChange={onEdgesChange}
         onPaneContextMenu={onPaneContextMenu}
         onNodeContextMenu={onNodeContextMenu}
+        onNodeClick={onNodeClick} // Added click handler
         onPaneClick={onPaneClick}
         nodeTypes={nodeTypes}
         fitView

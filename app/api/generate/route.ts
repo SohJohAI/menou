@@ -19,41 +19,27 @@ export async function POST(req: NextRequest) {
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemma-3-12b-it" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-    const prompt = `
-あなたは厳しいプロの書籍編集者です。
-ユーザーのアイデア（ノード）に対し、物語を面白くするための「短く、具体的で、鋭い問いかけ」を3つ投げかけてください。
+    const chat = model.startChat({
+      history: [
+        {
+          role: "user",
+          parts: [{ text: "あなたは敏腕編集者です。ユーザーのアイデアに対し、1行20文字以内で、短く鋭い問いかけを3つ生成してください。前置きや説明は不要で、JSON形式のみを返してください。例: {\"questions\": [\"問いかけ1\", \"問いかけ2\", \"問いかけ3\"]}" }],
+        },
+        {
+          role: "model",
+          parts: [{ text: "{\"questions\": [\"この作品のテーマは？\", \"ターゲット読者は？\", \"着想はどこから？\"]}" }],
+        },
+      ],
+      generationConfig: {
+        responseMimeType: "application/json",
+      },
+    });
 
-# 禁止事項
-- 「その後どうなりますか？」「具体的には？」のような、曖昧で汎用的な質問は禁止。
-- 敬語や丁寧な表現は不要。クリエイターを刺激するトーンで。
-
-# 良い質問の例
-ユーザー入力: "勇者が魔王を倒す"
-良い質問:
-1. "魔王の死後、世界はどう混乱する？"
-2. "勇者が払った最大の代償は？"
-3. "実は魔王が正しかった可能性は？"
-
-ユーザー入力: "AIと魔法の融合"
-良い質問:
-1. "魔法使いはAIを差別するか？"
-2. "バグった魔法が引き起こす災害は？"
-3. "AIに「魂」は宿るか、それとも模倣か？"
-
-# 命令
-以下の入力に対して、上記のような鋭い質問を3つ生成し、JSON形式 \`{"questions": ["...", "...", "..."]}\` で出力せよ。余計な会話は一切不要。
-
-入力: ${text}
-`;
-
-    const result = await model.generateContent(prompt);
+    const result = await chat.sendMessage(text);
     const responseText = result.response.text();
-
-    // Extract JSON using regex to handle potential Markdown code blocks
-    const jsonMatch = responseText.replace(/```json|```/g, "").trim();
-    const parsedResponse = JSON.parse(jsonMatch);
+    const parsedResponse = JSON.parse(responseText);
 
     return NextResponse.json(parsedResponse);
   } catch (error) {

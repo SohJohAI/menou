@@ -26,7 +26,7 @@ export async function POST(request: Request) {
 
         // 3. モデル指定（gemini-1.5-pro 推奨だが、なければ flash で）
         // ※ 2.5 は存在しないはずなので 1.5 に修正
-        const model = genAI.getGenerativeModel({ model: "gemma-3-12b-it" });
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
         const prompt = `
 あなたは敏腕の書籍編集者です。

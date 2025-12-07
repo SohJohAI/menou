@@ -6,7 +6,8 @@ import { Handle, Position, NodeProps, useReactFlow } from "@xyflow/react";
 export type NodeData = {
   label: string;
   isGhost?: boolean;
-  question?: string; // Renamed from aiQuestion and kept for persistence
+  question?: string;
+  variant?: "question" | "inspiration" | "alchemy"; // Added variant
 };
 
 function MindMapNode({ id, data }: NodeProps) {
@@ -37,17 +38,29 @@ function MindMapNode({ id, data }: NodeProps) {
   );
 
   const isGhost = nodeData.isGhost;
-  const question = nodeData.question; // Use 'question' now
+  const question = nodeData.question;
+  const variant = nodeData.variant;
 
-  const containerClasses = `
-    ${isGhost ? "bg-blue-50 border-dashed border-blue-400 rounded-2xl" : "bg-yellow-100 border-yellow-300 rounded-lg"}
-    shadow-md p-2 text-slate-800
-  `;
+  let containerClasses = "shadow-md p-2 text-slate-800 transition-all"; // Base classes
+
+  if (variant === "alchemy") {
+    containerClasses += " bg-orange-50 border-2 border-orange-500 rounded-lg shadow-xl";
+  } else if (variant === "question") {
+    containerClasses += " bg-slate-50 border border-blue-300 rounded-lg";
+  } else if (variant === "inspiration") {
+    containerClasses += " bg-yellow-50 border border-yellow-400 rounded-lg";
+  } else if (isGhost) {
+    containerClasses += " bg-blue-50 border-dashed border-blue-400 rounded-2xl";
+  } else {
+    containerClasses += " bg-yellow-100 border-yellow-300 rounded-lg"; // Default existing style
+  }
+
+  const isAlchemy = variant === "alchemy";
 
   return (
     <div
       className={containerClasses}
-      style={{ minWidth: "150px", minHeight: "50px" }}
+      style={{ minWidth: isAlchemy ? "250px" : "150px", minHeight: isAlchemy ? "80px" : "50px" }} // Alchemy nodes are bigger
     >
       <Handle type="target" position={Position.Top} />
       {question && ( // Always show question if it exists
@@ -57,7 +70,7 @@ function MindMapNode({ id, data }: NodeProps) {
         id={`text-${id}`}
         name="text"
         onChange={onChange}
-        className="nodrag w-full h-full resize-none bg-transparent focus:outline-none"
+        className={`nodrag w-full h-full resize-none bg-transparent focus:outline-none ${isAlchemy ? "text-lg font-bold" : "text-sm"}`}
         value={nodeData.label} // Always show user's label
         placeholder="回答を入力..."
         style={{ minWidth: "100px", minHeight: "30px" }}

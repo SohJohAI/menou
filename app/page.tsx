@@ -80,8 +80,8 @@ function Flow() {
           x: targetNode.position.x + 250,
           y: targetNode.position.y,
         },
-        data: { label: "⚗️ 錬成中...", isGhost: true },
-        style: { backgroundColor: "transparent", width: "150px" },
+        data: { label: "⚗️ 錬成中...", isGhost: true, variant: "alchemy" },
+        style: { backgroundColor: "transparent", width: "250px" }, // Initial wide style
       };
 
       setNodes((nds) => nds.concat(alchemyNode));
@@ -116,7 +116,12 @@ function Flow() {
             if (n.id === alchemyNodeId) {
               return {
                 ...n,
-                data: { ...n.data, label: resultLabel, isGhost: false },
+                data: {
+                  ...n.data,
+                  label: resultLabel,
+                  isGhost: false,
+                  variant: "alchemy" // Ensure variant persists
+                },
               };
             }
             return n;
@@ -309,7 +314,12 @@ function Flow() {
               x: parentNode.position.x + offsetX + (index * 20),
               y: baseY + index * 100 + randomOffsetY,
             },
-            data: { label: "", isGhost: true, question: question },
+            data: {
+              label: "",
+              isGhost: true,
+              question: question,
+              variant: mode // Set variant to mode (question or inspiration)
+            },
             style: { backgroundColor: "transparent", width: "200px" },
           };
           newNodes.push(newNode);

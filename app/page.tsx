@@ -23,17 +23,26 @@ import { supabase } from "../lib/supabaseClient";
 import { saveMindMap, fetchMindMap } from "../lib/supabaseFunctions";
 import { getContextHistory, buildFullTreeText } from "../lib/mindMapUtils";
 
-const initialNodes: Node<NodeData>[] = [];
+// Fix 1: Initial Node
+const initialNodes: Node<NodeData>[] = [
+  {
+    id: "1",
+    type: "mindMapNode",
+    position: { x: 0, y: 0 },
+    data: { label: "テーマを入力...", isGhost: false },
+    style: { backgroundColor: "transparent", width: "150px" },
+  },
+];
 const nodeTypes = { mindMapNode: MindMapNode };
 const initialEdges: Edge[] = [];
 
-let id = 0;
-const getId = () => `dndnode_${id++}`;
+// Use timestamp to avoid ID collisions
+const getId = () => `dndnode_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
 function Flow() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, setCenter } = useReactFlow(); // Added setCenter
   const [userId, setUserId] = useState<string | null>(null);
 
   // ▼ Selection State (instead of Context Menu)
@@ -48,7 +57,13 @@ function Flow() {
         setUserId(session.user.id);
         const data = await fetchMindMap(session.user.id);
         if (data && data.flow_data) {
-          setNodes(data.flow_data.nodes || []);
+          // If nodes are empty (e.g. user deleted all), restore default node for better UX
+          const loadedNodes = data.flow_data.nodes || [];
+          if (loadedNodes.length === 0) {
+            setNodes(initialNodes);
+          } else {
+            setNodes(loadedNodes);
+          }
           setEdges(data.flow_data.edges || []);
         }
       }
@@ -60,12 +75,18 @@ function Flow() {
         setUserId(session.user.id);
         const data = await fetchMindMap(session.user.id);
         if (data && data.flow_data) {
-          setNodes(data.flow_data.nodes || []);
+          const loadedNodes = data.flow_data.nodes || [];
+          if (loadedNodes.length === 0) {
+            setNodes(initialNodes);
+          } else {
+            setNodes(loadedNodes);
+          }
           setEdges(data.flow_data.edges || []);
         }
       } else {
         setUserId(null);
-        setNodes([]);
+        // Reset to initial state on logout
+        setNodes(initialNodes);
         setEdges([]);
       }
     });
@@ -92,8 +113,6 @@ function Flow() {
 
   const onNodeClick = useCallback(
     (event: React.MouseEvent, node: Node) => {
-      // Prevent event bubbling if needed, but ReactFlow usually handles basic selection
-      // However, we need to track our own state for the Action Bar
       setSelectedNode(node);
     },
     []
@@ -123,8 +142,6 @@ function Flow() {
     [screenToFlowPosition, setNodes]
   );
 
-  // Disable default context menu or make it just select the node?
-  // User requested to disable/change logic. We'll map it to selection for consistency.
   const onNodeContextMenu = useCallback(
     (event: React.MouseEvent, node: Node) => {
       event.preventDefault();
@@ -133,11 +150,26 @@ function Flow() {
     []
   );
 
+  // Fix 2: FAB Handler
+  const handleAddRootNode = useCallback(() => {
+    const newNodeId = getId();
+    const newNode: Node<NodeData> = {
+      id: newNodeId,
+      type: "mindMapNode",
+      position: { x: 0, y: 0 },
+      data: { label: "新しいアイデア", isGhost: false },
+      style: { backgroundColor: "transparent", width: "150px" },
+    };
+
+    setNodes((nds) => nds.concat(newNode));
+    // Center view on new node
+    setCenter(0, 0, { zoom: 1, duration: 800 });
+  }, [setNodes, setCenter]);
+
+
   const handleGenerateFromNode = useCallback(async () => {
     if (!selectedNode) return;
     setIsGenerating(true);
-    // Don't clear selection immediately so user can see what they are acting on,
-    // or clear it if preferred. Let's keep it for now.
 
     const parentNode = selectedNode as Node<NodeData>;
 
@@ -273,6 +305,19 @@ function Flow() {
           考え中...
         </div>
       )}
+
+      {/* FAB: Add Root Node */}
+      <div className="fixed bottom-4 left-4 z-50 pointer-events-auto">
+        <button
+          onClick={handleAddRootNode}
+          className="bg-blue-600 hover:bg-blue-700 text-white w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition hover:scale-105 active:scale-95"
+          title="新しいアイデアを追加"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+          </svg>
+        </button>
+      </div>
 
       {/* Create Proposal Button - Bottom Right */}
       <div className="fixed bottom-4 right-4 z-50 pointer-events-auto">

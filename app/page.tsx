@@ -276,10 +276,12 @@ function Flow() {
       const contextHistory = getContextHistory(parentNode, nodes as Node<NodeData>[], edges);
       setDebugContext(contextHistory);
 
+      const depth = getNodeDepth(parentNode.id, edges); // Calculate depth
+
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: contextHistory, mode }), // Send mode
+        body: JSON.stringify({ text: contextHistory, mode, depth }), // Send depth
       });
 
       if (!response.ok) {
@@ -348,6 +350,21 @@ function Flow() {
       descendants = [...descendants, ...getDescendants(child.target, currentEdges)];
     }
     return descendants;
+  };
+
+  // Helper to calculate depth (0 = Root)
+  const getNodeDepth = (nodeId: string, currentEdges: Edge[]): number => {
+    let depth = 0;
+    let currentId = nodeId;
+    while (true) {
+      // Find edge where target is currentId (finding parent)
+      const edge = currentEdges.find(e => e.target === currentId);
+      if (!edge) break; // Root found
+      depth++;
+      currentId = edge.source;
+      if (depth > 100) break; // Safety break for circular dependency (unlikely in tree but safe)
+    }
+    return depth;
   };
 
   const handleDeleteBranch = useCallback(() => {

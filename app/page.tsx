@@ -19,8 +19,9 @@ import {
 import "@xyflow/react/dist/style.css";
 import MindMapNode, { NodeData } from "../components/MindMapNode";
 import AuthButton from "../components/AuthButton";
-import { supabase } from "../lib/supabaseClient"; 
+import { supabase } from "../lib/supabaseClient";
 import { saveMindMap, fetchMindMap } from "../lib/supabaseFunctions";
+import { getContextHistory, buildFullTreeText } from "../lib/mindMapUtils";
 
 const initialNodes: Node<NodeData>[] = [];
 const nodeTypes = { mindMapNode: MindMapNode };
@@ -58,22 +59,22 @@ function Flow() {
     init();
 
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-        if (session?.user) {
-            setUserId(session.user.id);
-            const data = await fetchMindMap(session.user.id);
-            if (data && data.flow_data) {
-                setNodes(data.flow_data.nodes || []);
-                setEdges(data.flow_data.edges || []);
-            }
-        } else {
-            setUserId(null);
-            setNodes([]);
-            setEdges([]);
+      if (session?.user) {
+        setUserId(session.user.id);
+        const data = await fetchMindMap(session.user.id);
+        if (data && data.flow_data) {
+          setNodes(data.flow_data.nodes || []);
+          setEdges(data.flow_data.edges || []);
         }
+      } else {
+        setUserId(null);
+        setNodes([]);
+        setEdges([]);
+      }
     });
 
     return () => {
-        authListener.subscription.unsubscribe();
+      authListener.subscription.unsubscribe();
     };
   }, [setNodes, setEdges]);
 
@@ -132,13 +133,17 @@ function Flow() {
     setContextMenu(null);
 
     const parentNode = contextMenu.node as Node<NodeData>;
-    const parentNodeText = parentNode.data.label || "";
+    // const parentNodeText = parentNode.data.label || "";
 
     try {
+      // 改修: ルートまで遡って履歴を取得する
+      const contextHistory = getContextHistory(parentNode, nodes as Node<NodeData>[], edges);
+      setDebugContext(contextHistory); // Debug Update
+
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: parentNodeText }),
+        body: JSON.stringify({ text: contextHistory }),
       });
 
       if (!response.ok) {
@@ -147,6 +152,7 @@ function Flow() {
       }
 
       const data = await response.json();
+      setDebugResponse(data); // Debug Update
       const questions: string[] = data.questions || [];
 
       if (questions.length > 0) {
@@ -201,9 +207,9 @@ function Flow() {
     let descendants: string[] = [];
     const children = currentEdges.filter(e => e.source === nodeId);
     for (const child of children) {
-        descendants.push(child.target);
-        // 再帰的に孫、ひ孫も探す
-        descendants = [...descendants, ...getDescendants(child.target, currentEdges)];
+      descendants.push(child.target);
+      // 再帰的に孫、ひ孫も探す
+      descendants = [...descendants, ...getDescendants(child.target, currentEdges)];
     }
     return descendants;
   };
@@ -211,7 +217,7 @@ function Flow() {
   const handleDeleteBranch = useCallback(() => {
     if (!contextMenu?.node) return;
     const rootId = contextMenu.node.id;
-    
+
     // 自分自身 + 全ての子孫を探し出す
     const descendants = getDescendants(rootId, edges);
     const nodesToDelete = [rootId, ...descendants];
@@ -219,10 +225,43 @@ function Flow() {
     // まとめて削除
     setNodes((nds) => nds.filter((n) => !nodesToDelete.includes(n.id)));
     setEdges((eds) => eds.filter((e) => !nodesToDelete.includes(e.source) && !nodesToDelete.includes(e.target)));
-    
+
     setContextMenu(null);
   }, [contextMenu, edges, setNodes, setEdges]);
   // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
+  // ▼ Debug Panel Logic
+  const [showDebug, setShowDebug] = useState(false);
+  const [debugContext, setDebugContext] = useState<string>("");
+  const [debugResponse, setDebugResponse] = useState<any>(null);
+
+  // ▼ Proposal Generation Logic
+  const [isDrafting, setIsDrafting] = useState(false);
+  const [draftResult, setDraftResult] = useState<string | null>(null);
+
+  const handleCreateProposal = useCallback(async () => {
+    setIsDrafting(true);
+    try {
+      const treeText = buildFullTreeText(nodes as Node<NodeData>[], edges);
+      const response = await fetch("/api/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ treeText }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Draft generation failed");
+      }
+
+      const data = await response.json();
+      setDraftResult(data.proposal);
+    } catch (error) {
+      console.error(error);
+      alert("企画書生成エラー");
+    } finally {
+      setIsDrafting(false);
+    }
+  }, [nodes, edges]);
 
   return (
     <>
@@ -231,6 +270,71 @@ function Flow() {
           考え中...
         </div>
       )}
+
+      {/* Create Proposal Button */}
+      <div className="fixed top-4 right-32 z-50 pointer-events-auto">
+        <button
+          onClick={handleCreateProposal}
+          disabled={isDrafting}
+          className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded shadow transition disabled:opacity-50"
+        >
+          {isDrafting ? "生成中..." : "📝 企画書を作成"}
+        </button>
+      </div>
+
+      {/* Proposal Result Modal */}
+      {draftResult && (
+        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-8 pointer-events-auto">
+          <div className="bg-white rounded-lg shadow-2xl p-6 w-full max-w-4xl h-[80vh] flex flex-col">
+            <div className="flex justify-between items-center mb-4 border-b pb-2">
+              <h2 className="text-xl font-bold text-gray-800">小説企画書</h2>
+              <button onClick={() => setDraftResult(null)} className="text-gray-500 hover:text-gray-700">✕</button>
+            </div>
+            <div className="flex-1 overflow-auto bg-gray-50 p-4 rounded border font-serif leading-relaxed whitespace-pre-wrap text-gray-800">
+              {draftResult}
+            </div>
+            <div className="mt-4 flex justify-end space-x-2">
+              <button
+                onClick={() => navigator.clipboard.writeText(draftResult)}
+                className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-2 rounded"
+              >
+                コピー
+              </button>
+              <button
+                onClick={() => setDraftResult(null)}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
+              >
+                閉じる
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Debug Panel Toggle */}
+      <div className="fixed bottom-4 left-4 z-50 pointer-events-auto">
+        <button
+          onClick={() => setShowDebug(!showDebug)}
+          className="bg-gray-800 text-white px-3 py-1 rounded-full text-xs font-mono hover:bg-gray-700 shadow-lg"
+        >
+          🐞 Debug
+        </button>
+      </div>
+
+      {/* Debug Panel */}
+      {showDebug && (
+        <div className="fixed bottom-12 left-4 z-50 w-96 h-96 bg-black/80 backdrop-blur text-white p-4 rounded-lg text-xs font-mono overflow-auto shadow-2xl border border-gray-700 transform transition-all">
+          <div className="mb-4">
+            <h3 className="text-green-400 font-bold mb-1 border-b border-gray-600 pb-1">Context Payload</h3>
+            <pre className="whitespace-pre-wrap text-gray-300">{debugContext || "No context yet..."}</pre>
+          </div>
+          <div>
+            <h3 className="text-blue-400 font-bold mb-1 border-b border-gray-600 pb-1">Raw Response</h3>
+            <pre className="whitespace-pre-wrap text-gray-300">{debugResponse ? JSON.stringify(debugResponse, null, 2) : "No response yet..."}</pre>
+          </div>
+        </div>
+      )}
+
       {contextMenu && (
         <div
           style={{ top: contextMenu.y, left: contextMenu.x }}
@@ -243,7 +347,7 @@ function Flow() {
           >
             ✨ AIに展開する
           </button>
-          
+
           {/* 単体削除 */}
           <button
             onClick={handleDeleteNode}

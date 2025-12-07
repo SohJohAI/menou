@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite-preview-02-05" });
+    const model = genAI.getGenerativeModel({ model: "gemma-3-12b-it" });
 
     const chat = model.startChat({
       history: [
@@ -32,14 +32,15 @@ export async function POST(req: NextRequest) {
           parts: [{ text: "{\"questions\": [\"この作品のテーマは？\", \"ターゲット読者は？\", \"着想はどこから？\"]}" }],
         },
       ],
-      generationConfig: {
-        responseMimeType: "application/json",
-      },
+      // Gemma 3 does not support JSON mode, so we remove responseMimeType
     });
 
     const result = await chat.sendMessage(text);
     const responseText = result.response.text();
-    const parsedResponse = JSON.parse(responseText);
+
+    // Extract JSON using regex to handle potential Markdown code blocks
+    const jsonMatch = responseText.replace(/```json|```/g, "").trim();
+    const parsedResponse = JSON.parse(jsonMatch);
 
     return NextResponse.json(parsedResponse);
   } catch (error) {

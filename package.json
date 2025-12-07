@@ -11,8 +11,10 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@supabase/supabase-js": "^2.86.2",
+    "@types/dagre": "^0.7.53",
     "@xyflow/react": "^12.9.3",
     "clsx": "^2.1.1",
+    "dagre": "^0.8.5",
     "next": "^16.0.7",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",

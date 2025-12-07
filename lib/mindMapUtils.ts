@@ -1,5 +1,6 @@
-import { Node, Edge } from "@xyflow/react";
+import { Node, Edge, Position } from "@xyflow/react";
 import { NodeData } from "../components/MindMapNode";
+import dagre from "dagre";
 
 export const getContextHistory = (node: Node<NodeData>, nodes: Node<NodeData>[], edges: Edge[]): string => {
     let steps: { question?: string; answer?: string }[] = [];
@@ -70,3 +71,41 @@ export const buildFullTreeText = (nodes: Node<NodeData>[], edges: Edge[]): strin
 
     return rootNodes.map((root) => traverse(root, 0)).join("\n");
 };
+
+export const getLayoutedElements = (
+  nodes: Node<NodeData>[],
+  edges: Edge[],
+  direction = "LR"
+): { nodes: Node<NodeData>[]; edges: Edge[] } => {
+  const dagreGraph = new dagre.graphlib.Graph();
+  dagreGraph.setDefaultEdgeLabel(() => ({}));
+
+  const isHorizontal = direction === "LR";
+  dagreGraph.setGraph({ rankdir: direction });
+
+  nodes.forEach((node) => {
+    dagreGraph.setNode(node.id, { width: 220, height: 100 });
+  });
+
+  edges.forEach((edge) => {
+    dagreGraph.setEdge(edge.source, edge.target);
+  });
+
+  dagre.layout(dagreGraph);
+
+  const layoutedNodes = nodes.map((node) => {
+    const nodeWithPosition = dagreGraph.node(node.id);
+    return {
+      ...node,
+      targetPosition: isHorizontal ? Position.Left : Position.Top,
+      sourcePosition: isHorizontal ? Position.Right : Position.Bottom,
+      position: {
+        x: nodeWithPosition.x - 110,
+        y: nodeWithPosition.y - 50,
+      },
+    };
+  });
+
+  return { nodes: layoutedNodes, edges };
+};
+

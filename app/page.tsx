@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   ReactFlow,
   Controls,
@@ -21,7 +21,7 @@ import MindMapNode, { NodeData } from "../components/MindMapNode";
 import AuthButton from "../components/AuthButton";
 import { supabase } from "../lib/supabaseClient";
 import { saveMindMap, fetchMindMap } from "../lib/supabaseFunctions";
-import { getContextHistory, buildFullTreeText } from "../lib/mindMapUtils";
+import { getContextHistory, buildFullTreeText, getLayoutedElements } from "../lib/mindMapUtils"; // Added getLayoutedElements
 
 // Fix 1: Initial Node
 const initialNodes: Node<NodeData>[] = [
@@ -42,10 +42,96 @@ const getId = () => `dndnode_${Date.now()}_${Math.random().toString(36).substr(2
 function Flow() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
-  const { screenToFlowPosition, setCenter } = useReactFlow(); // Added setCenter
+  const { screenToFlowPosition, setCenter, getIntersectingNodes, fitView } = useReactFlow(); // Added fitView
   const [userId, setUserId] = useState<string | null>(null);
 
-  // ▼ Selection State (instead of Context Menu)
+  // ▼ Drag & Drop Synthesis State
+  const dragStartPos = useRef<{ x: number; y: number } | null>(null); // Store initial position
+
+  const onNodeDragStart = useCallback((event: React.MouseEvent, node: Node) => {
+    dragStartPos.current = { ...node.position };
+  }, []);
+
+  const onNodeDragStop = useCallback(async (event: React.MouseEvent, node: Node) => {
+    if (!dragStartPos.current) return;
+
+    const intersections = getIntersectingNodes(node).filter((n) => n.id !== node.id);
+    if (intersections.length > 0) {
+      const targetNode = intersections[0];
+      const sourceNode = node;
+
+      // 1. Restore Source Node Position immediately
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id === sourceNode.id) {
+            return { ...n, position: dragStartPos.current! };
+          }
+          return n;
+        })
+      );
+
+      // 2. Optimistic UI: "Alchemy in progress"
+      const alchemyNodeId = getId();
+      // Position it to the right of target node for now, or near it
+      const alchemyNode: Node<NodeData> = {
+        id: alchemyNodeId,
+        type: "mindMapNode",
+        position: {
+          x: targetNode.position.x + 250,
+          y: targetNode.position.y,
+        },
+        data: { label: "⚗️ 錬成中...", isGhost: true },
+        style: { backgroundColor: "transparent", width: "150px" },
+      };
+
+      setNodes((nds) => nds.concat(alchemyNode));
+      setEdges((eds) =>
+        eds.concat({
+          id: `e${targetNode.id}-${alchemyNodeId}`,
+          source: targetNode.id,
+          target: alchemyNodeId,
+          markerEnd: { type: MarkerType.ArrowClosed },
+        })
+      );
+
+      // 3. API Call
+      try {
+        const response = await fetch("/api/synthesize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sourceA: sourceNode.data.label,
+            sourceB: targetNode.data.label,
+          }),
+        });
+
+        if (!response.ok) throw new Error("Synthesis failed");
+
+        const data = await response.json();
+        const resultLabel = data.result;
+
+        // 4. Update Alchemy Node
+        setNodes((nds) =>
+          nds.map((n) => {
+            if (n.id === alchemyNodeId) {
+              return {
+                ...n,
+                data: { ...n.data, label: resultLabel, isGhost: false },
+              };
+            }
+            return n;
+          })
+        );
+      } catch (error) {
+        console.error(error);
+        // Error handling: Remove alchemy node or show error
+        setNodes((nds) => nds.filter((n) => n.id !== alchemyNodeId));
+        setEdges((eds) => eds.filter((e) => e.target !== alchemyNodeId));
+        alert("錬成失敗...");
+      }
+    }
+    dragStartPos.current = null;
+  }, [getIntersectingNodes, setNodes, setEdges]);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
 
@@ -166,8 +252,21 @@ function Flow() {
     setCenter(0, 0, { zoom: 1, duration: 800 });
   }, [setNodes, setCenter]);
 
+  // ▼ Auto Layout Logic
+  const onLayout = useCallback(() => {
+    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+      nodes as Node<NodeData>[],
+      edges as Edge[]
+    );
+    setNodes([...layoutedNodes]);
+    setEdges([...layoutedEdges]);
+    setTimeout(() => {
+      fitView({ duration: 800 });
+    }, 10);
+  }, [nodes, edges, setNodes, setEdges, fitView]);
 
-  const handleGenerateFromNode = useCallback(async () => {
+
+  const handleGenerateFromNode = useCallback(async (mode: "question" | "inspiration") => {
     if (!selectedNode) return;
     setIsGenerating(true);
 
@@ -180,7 +279,7 @@ function Flow() {
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: contextHistory }),
+        body: JSON.stringify({ text: contextHistory, mode }), // Send mode
       });
 
       if (!response.ok) {
@@ -307,7 +406,7 @@ function Flow() {
       )}
 
       {/* FAB: Add Root Node */}
-      <div className="fixed bottom-4 left-4 z-50 pointer-events-auto">
+      <div className="fixed bottom-4 left-4 z-50 pointer-events-auto flex items-end space-x-2">
         <button
           onClick={handleAddRootNode}
           className="bg-blue-600 hover:bg-blue-700 text-white w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition hover:scale-105 active:scale-95"
@@ -316,6 +415,13 @@ function Flow() {
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
           </svg>
+        </button>
+        <button
+          onClick={onLayout}
+          className="bg-gray-100 hover:bg-gray-200 text-gray-700 w-10 h-10 rounded-full shadow flex items-center justify-center transition"
+          title="整列"
+        >
+          <span className="text-lg">🧹</span>
         </button>
       </div>
 
@@ -334,12 +440,21 @@ function Flow() {
       {selectedNode && (
         <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 pointer-events-auto flex items-center space-x-2 bg-white rounded-full shadow-xl px-4 py-2 border border-gray-100">
           <button
-            onClick={handleGenerateFromNode}
+            onClick={() => handleGenerateFromNode("question")}
             disabled={isGenerating}
             className="flex flex-col items-center justify-center px-3 py-1 text-xs text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-50 transition"
           >
-            <span className="text-xl mb-1">✨</span>
-            <span>広げる</span>
+            <span className="text-xl mb-1">⛏️</span>
+            <span>深掘り</span>
+          </button>
+          <div className="w-px h-8 bg-gray-200 mx-1"></div>
+          <button
+            onClick={() => handleGenerateFromNode("inspiration")}
+            disabled={isGenerating}
+            className="flex flex-col items-center justify-center px-3 py-1 text-xs text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-50 transition"
+          >
+            <span className="text-xl mb-1">💡</span>
+            <span>提案</span>
           </button>
           <div className="w-px h-8 bg-gray-200 mx-1"></div>
           <button
@@ -421,6 +536,8 @@ function Flow() {
         onPaneContextMenu={onPaneContextMenu}
         onNodeContextMenu={onNodeContextMenu}
         onNodeClick={onNodeClick} // Added click handler
+        onNodeDragStart={onNodeDragStart}
+        onNodeDragStop={onNodeDragStop}
         onPaneClick={onPaneClick}
         nodeTypes={nodeTypes}
         fitView

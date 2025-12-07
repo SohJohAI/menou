@@ -1,18 +1,32 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useRef, useEffect } from "react";
 import { Handle, Position, NodeProps, useReactFlow } from "@xyflow/react";
 
 export type NodeData = {
   label: string;
   isGhost?: boolean;
   question?: string;
-  variant?: "question" | "inspiration" | "alchemy"; // Added variant
+  variant?: "question" | "inspiration" | "alchemy";
 };
 
 function MindMapNode({ id, data }: NodeProps) {
   const nodeData = data as NodeData;
   const { setNodes } = useReactFlow();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize Logic
+  const adjustHeight = () => {
+    const el = textareaRef.current;
+    if (el) {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    }
+  };
+
+  useEffect(() => {
+    adjustHeight();
+  }, [nodeData.label]);
 
   const onChange = useCallback(
     (evt: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -26,7 +40,7 @@ function MindMapNode({ id, data }: NodeProps) {
               data: {
                 ...currentNodeData,
                 label: newLabel,
-                isGhost: newLabel.length === 0 ? currentNodeData.isGhost : false, // 実体化ロジック
+                isGhost: newLabel.length === 0 ? currentNodeData.isGhost : false,
               },
             };
           }
@@ -41,7 +55,7 @@ function MindMapNode({ id, data }: NodeProps) {
   const question = nodeData.question;
   const variant = nodeData.variant;
 
-  let containerClasses = "shadow-md p-2 text-slate-800 transition-all"; // Base classes
+  let containerClasses = "shadow-md p-2 text-slate-800 transition-all";
 
   if (variant === "alchemy") {
     containerClasses += " bg-orange-50 border-2 border-orange-500 rounded-lg shadow-xl";
@@ -52,7 +66,7 @@ function MindMapNode({ id, data }: NodeProps) {
   } else if (isGhost) {
     containerClasses += " bg-blue-50 border-dashed border-blue-400 rounded-2xl";
   } else {
-    containerClasses += " bg-yellow-100 border-yellow-300 rounded-lg"; // Default existing style
+    containerClasses += " bg-yellow-100 border-yellow-300 rounded-lg";
   }
 
   const isAlchemy = variant === "alchemy";
@@ -60,20 +74,22 @@ function MindMapNode({ id, data }: NodeProps) {
   return (
     <div
       className={containerClasses}
-      style={{ minWidth: isAlchemy ? "250px" : "150px", minHeight: isAlchemy ? "80px" : "50px" }} // Alchemy nodes are bigger
+      style={{ minWidth: isAlchemy ? "250px" : "150px", minHeight: isAlchemy ? "80px" : "50px" }}
     >
       <Handle type="target" position={Position.Top} />
-      {question && ( // Always show question if it exists
+      {question && (
         <p className="font-bold text-sm mb-1 text-blue-700">{question}</p>
       )}
       <textarea
+        ref={textareaRef}
         id={`text-${id}`}
         name="text"
         onChange={onChange}
-        className={`nodrag w-full h-full resize-none bg-transparent focus:outline-none ${isAlchemy ? "text-lg font-bold" : "text-sm"}`}
-        value={nodeData.label} // Always show user's label
+        className={`nodrag w-full resize-none bg-transparent focus:outline-none overflow-hidden ${isAlchemy ? "text-lg font-bold" : "text-sm"}`}
+        value={nodeData.label}
         placeholder="回答を入力..."
-        style={{ minWidth: "100px", minHeight: "30px" }}
+        rows={1}
+        style={{ minWidth: "100px" }}
       />
       <Handle type="source" position={Position.Bottom} />
     </div>

@@ -61,6 +61,7 @@ export async function POST(req: NextRequest) {
       ],
       generationConfig: {
         responseMimeType: "application/json",
+        temperature: mode === "inspiration" ? 1.2 : 0.7, // Higher creativity for inspiration
       },
     });
 
